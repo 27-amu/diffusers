@@ -13,6 +13,7 @@ from diffusers import (
     FlowMatchEulerDiscreteScheduler,
     FluxPipeline,
     FluxTransformer2DModel,
+    UniPCMultistepScheduler,
 )
 from diffusers.utils.import_utils import is_peft_available
 
@@ -181,6 +182,33 @@ class TestFluxPipeline(FluxPipelineTesterConfig, PipelineTesterMixin):
         assert not torch.allclose(no_true_cfg_out, true_cfg_out), (
             "Outputs should be different when true_cfg_scale is set."
         )
+
+    def test_stochastic_sampling_uses_generator(self):
+        # Regression test for https://github.com/huggingface/diffusers/issues/15163: the noise drawn inside
+        # `scheduler.step` must come from the supplied generator, not the global RNG.
+        components = self.get_dummy_components()
+        components["scheduler"] = FlowMatchEulerDiscreteScheduler(stochastic_sampling=True)
+        pipe = self.pipeline_class(**components).to(torch_device)
+
+        outputs = []
+        for global_seed in (13, 99):
+            torch.manual_seed(global_seed)
+            outputs.append(pipe(**self.get_dummy_inputs()).images)
+
+        assert torch.allclose(outputs[0], outputs[1]), (
+            "Stochastic sampling should be reproducible from the supplied generator, regardless of the global RNG."
+        )
+
+    def test_scheduler_without_generator_in_step(self):
+        # `UniPCMultistepScheduler.step` takes no `generator`; the pipeline must not forward one to it.
+        components = self.get_dummy_components()
+        components["scheduler"] = UniPCMultistepScheduler(
+            use_flow_sigmas=True, prediction_type="flow_prediction", use_dynamic_shifting=True
+        )
+        pipe = self.pipeline_class(**components).to(torch_device)
+
+        image = pipe(**self.get_dummy_inputs()).images
+        assert image.shape == (1, *self.output_shape)
 
     def test_flux_negative_embeds_shape_check(self):
         pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)

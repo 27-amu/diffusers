@@ -817,6 +817,15 @@ class LTXConditionPipeline(DiffusionPipeline, FromSingleFileMixin, LTXVideoLoraL
         timesteps = timesteps[start_index:]
         return sigmas, timesteps, num_inference_steps - start_index
 
+    # Copied from diffusers.pipelines.flux.pipeline_flux.FluxPipeline.prepare_extra_step_kwargs
+    def prepare_extra_step_kwargs(self, generator):
+        # Pass the generator so stochastic sampling is reproducible, and skip it for
+        # schedulers like UniPC that don't accept one.
+        extra_step_kwargs = {}
+        if "generator" in set(inspect.signature(self.scheduler.step).parameters.keys()):
+            extra_step_kwargs["generator"] = generator
+        return extra_step_kwargs
+
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -1165,6 +1174,8 @@ class LTXConditionPipeline(DiffusionPipeline, FromSingleFileMixin, LTXVideoLoraL
             video_coords = torch.cat([video_coords, video_coords], dim=0)
 
         # 6. Denoising loop
+        extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
+
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -1221,7 +1232,7 @@ class LTXConditionPipeline(DiffusionPipeline, FromSingleFileMixin, LTXVideoLoraL
                         )
 
                 denoised_latents = self.scheduler.step(
-                    -noise_pred, t, latents, per_token_timesteps=timestep, return_dict=False
+                    -noise_pred, t, latents, per_token_timesteps=timestep, **extra_step_kwargs, return_dict=False
                 )[0]
                 if is_conditioning_image_or_video:
                     tokens_to_denoise_mask = (t / 1000 - 1e-6 < (1.0 - conditioning_mask)).unsqueeze(-1)

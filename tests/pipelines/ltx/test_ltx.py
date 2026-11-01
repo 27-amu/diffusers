@@ -140,6 +140,22 @@ class TestLTXPipeline(LTXPipelineTesterConfig, PipelineTesterMixin):
             "VAE tiling should not affect the inference results."
         )
 
+    def test_stochastic_sampling_uses_generator(self):
+        # Regression test for https://github.com/huggingface/diffusers/issues/15163: the noise drawn inside
+        # `scheduler.step` must come from the supplied generator, not the global RNG.
+        components = self.get_dummy_components()
+        components["scheduler"] = FlowMatchEulerDiscreteScheduler(stochastic_sampling=True)
+        pipe = self.pipeline_class(**components).to(torch_device)
+
+        outputs = []
+        for global_seed in (13, 99):
+            torch.manual_seed(global_seed)
+            outputs.append(pipe(**self.get_dummy_inputs()).frames)
+
+        assert torch.allclose(outputs[0], outputs[1]), (
+            "Stochastic sampling should be reproducible from the supplied generator, regardless of the global RNG."
+        )
+
 
 class TestLTXPipelineMemory(LTXPipelineTesterConfig, MemoryTesterMixin):
     """Memory optimization tests (CPU offload, group offload, layerwise casting) for the LTX pipeline."""

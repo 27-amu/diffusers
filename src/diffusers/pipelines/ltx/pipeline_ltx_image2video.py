@@ -565,6 +565,15 @@ class LTXImageToVideoPipeline(DiffusionPipeline, FromSingleFileMixin, LTXVideoLo
 
         return latents, conditioning_mask
 
+    # Copied from diffusers.pipelines.flux.pipeline_flux.FluxPipeline.prepare_extra_step_kwargs
+    def prepare_extra_step_kwargs(self, generator):
+        # Pass the generator so stochastic sampling is reproducible, and skip it for
+        # schedulers like UniPC that don't accept one.
+        extra_step_kwargs = {}
+        if "generator" in set(inspect.signature(self.scheduler.step).parameters.keys()):
+            extra_step_kwargs["generator"] = generator
+        return extra_step_kwargs
+
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -826,6 +835,8 @@ class LTXImageToVideoPipeline(DiffusionPipeline, FromSingleFileMixin, LTXVideoLo
         )
 
         # 7. Denoising loop
+        extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
+
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -886,7 +897,9 @@ class LTXImageToVideoPipeline(DiffusionPipeline, FromSingleFileMixin, LTXVideoLo
 
                 noise_pred = noise_pred[:, :, 1:]
                 noise_latents = latents[:, :, 1:]
-                pred_latents = self.scheduler.step(noise_pred, t, noise_latents, return_dict=False)[0]
+                pred_latents = self.scheduler.step(
+                    noise_pred, t, noise_latents, **extra_step_kwargs, return_dict=False
+                )[0]
 
                 latents = torch.cat([latents[:, :, :1], pred_latents], dim=2)
                 latents = self._pack_latents(

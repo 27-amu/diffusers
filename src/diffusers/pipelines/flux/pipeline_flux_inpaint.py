@@ -758,6 +758,15 @@ class FluxInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, FluxIPAdapterM
 
         return mask, masked_image_latents
 
+    # Copied from diffusers.pipelines.flux.pipeline_flux.FluxPipeline.prepare_extra_step_kwargs
+    def prepare_extra_step_kwargs(self, generator):
+        # Pass the generator so stochastic sampling is reproducible, and skip it for
+        # schedulers like UniPC that don't accept one.
+        extra_step_kwargs = {}
+        if "generator" in set(inspect.signature(self.scheduler.step).parameters.keys()):
+            extra_step_kwargs["generator"] = generator
+        return extra_step_kwargs
+
     @property
     def guidance_scale(self):
         return self._guidance_scale
@@ -1137,6 +1146,8 @@ class FluxInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, FluxIPAdapterM
             )
 
         # 6. Denoising loop
+        extra_step_kwargs = self.prepare_extra_step_kwargs(generator)
+
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:
@@ -1176,7 +1187,7 @@ class FluxInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, FluxIPAdapterM
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
-                latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
 
                 # for 64 channel transformer only.
                 init_latents_proper = image_latents
